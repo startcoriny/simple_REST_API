@@ -2,34 +2,43 @@
 
 import express from 'express';
 import Todo from '../schemas/todo.schema.js'
+import Joi from 'joi';
+
+// 할 일 생성 API의 요청 데이터 검증을 위한 Joi 스키마를 정의합니다.
+const createTodoSchema = Joi.object({
+    value: Joi.string().min(1).max(50).required(),
+});
 
 const router = express.Router();
 
 /* 데이터 삽입 */
 router.post('/todos', async (req, res) => {
-    // 클라이언트에게 전달 받은 value데이터를 구조분해할당을 사용하여 변수에 저장
-    const { value } = req.body
+    //데이터 유효성 검증을 실패한 코드에서 에러가 발생하는 경우에 대한 대응 방법 try/ catch
+    try {
+        // 클라이언트에게 전달받은 데이터를 검증합니다.
+        const validation = await createTodoSchema.validateAsync(req.body);
 
-    // value가 존재하지 않을 때, 클라이언트에게 에러 메시지를 전달
-    if (!value) {
-        return res
-            .status(400)
-            .json({ errorMessage: '해야할 일 데이터가 존재하지 않습니다.' });
+        // 클라이언트에게 전달받은 value 데이터를 변수에 저장합니다.
+        const { value } = validation
+
+        // MongoDB데이터베이스에서 Todo모델의 데이터를 검색하고 order필드를 기준으로 내림차순(-)으로 정렬한후 최대값 찾는 과정.
+        const todoMaxOrder = await Todo.findOne().sort('-order').exec();
+
+        // 'order' 값이 가장 높은 도큐멘트의 1을 추가하거나 없다면, 1을 할당
+        const order = todoMaxOrder ? todoMaxOrder.order + 1 : 1
+
+        // Todo모델을 이용해, 새로운 '해야할 일'을 생성
+        const todo = new Todo({ value, order });
+
+        // 생성한 '해야할 일'을 MongoDB에 저장
+        await todo.save();
+
+        return res.status(201).json({ todo });
+    } catch (error) {
+        // 발생한 에러를 다음 에러 처리 미들웨어로 전달합니다.
+        next(error);
     }
 
-    // MongoDB데이터베이스에서 Todo모델의 데이터를 검색하고 order필드를 기준으로 내림차순(-)으로 정렬한후 최대값 찾는 과정.
-    const todoMaxOrder = await Todo.findOne().sort('-order').exec();
-
-    // 'order' 값이 가장 높은 도큐멘트의 1을 추가하거나 없다면, 1을 할당
-    const order = todoMaxOrder ? todoMaxOrder.order + 1 : 1
-
-    // Todo모델을 이용해, 새로운 '해야할 일'을 생성
-    const todo = new Todo({ value, order });
-
-    // 생성한 '해야할 일'을 MongoDB에 저장
-    await todo.save();
-
-    return res.status(201).json({ todo });
 });
 
 
@@ -64,7 +73,7 @@ router.patch('/todos/:todoId', async (req, res) => {
     }
 
     if (order) { //order가 있다면 순서를 변경하는 로직
-        const changeTarget = await Todo.findOne({order}).exec();
+        const changeTarget = await Todo.findOne({ order }).exec();
         if (changeTarget) {
             changeTarget.order = currentTodo.order;
             await changeTarget.save(); // 변경사항 저장
@@ -77,7 +86,7 @@ router.patch('/todos/:todoId', async (req, res) => {
         currentTodo.doneAt = done ? new Date() : null;
     }
 
-    if(value){ // 변경하려는 해야할일(value)의 내용을 변경
+    if (value) { // 변경하려는 해야할일(value)의 내용을 변경
         currentTodo.value = value;
     }
 
@@ -88,19 +97,19 @@ router.patch('/todos/:todoId', async (req, res) => {
 
 
 /* 할 일 삭제 */
-router.delete('/todos/:todoId',async (req,res)=>{
-    const {todoId} = req.params;
+router.delete('/todos/:todoId', async (req, res) => {
+    const { todoId } = req.params;
 
     // 삭제하려는 '해야할 일'을 가져오는데 없으면 존재 x알림
     const currentTodo = await Todo.findById(todoId).exec() // 명시적으로 id를 찾는다고 했으므로 값만 넣어주면 됨.
-    if(!currentTodo){
+    if (!currentTodo) {
         return res
             .status(404)
-            .json({errermessage:'존재하지 않는 데이터'})
+            .json({ errermessage: '존재하지 않는 데이터' })
     }
 
     // 주어진 id값으로 데이터 베이스에 해당하는 해야할 일 삭제
-    await Todo.deleteOne({_id:todoId}).exec(); // 1가지를 삭제하는거지 id를 찾아서 삭제하는게 아니므로 명시적으로 지정해주어야 함
+    await Todo.deleteOne({ _id: todoId }).exec(); // 1가지를 삭제하는거지 id를 찾아서 삭제하는게 아니므로 명시적으로 지정해주어야 함
     return res.status(200).json({});
 });
 
